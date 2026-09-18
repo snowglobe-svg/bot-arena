@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BOT ARENA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0A0E0F;
+    --panel: #12181A;
+    --panel-line: #22302C;
+    --text: #E8ECEA;
+    --text-dim: #7C8B87;
+    --green: #4CFFB3;
+    --amber: #FFB454;
+    --red: #FF5C5C;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    min-height: 100vh;
+    background-image:
+      linear-gradient(rgba(76,255,179,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(76,255,179,0.03) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  h1, h2, h3, .display {
+    font-family: 'Chakra Petch', sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin: 0;
+  }
+
+  .wrap {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 28px 20px 80px;
+  }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--panel-line);
+    padding-bottom: 18px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  header h1 {
+    font-size: 28px;
+    color: var(--green);
+  }
+
+  header h1 span { color: var(--text); }
+
+  .net-tag {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  #connectBtn {
+    background: var(--green);
+    color: #06110D;
+    border: none;
+    padding: 10px 18px;
+    font-family: 'Chakra Petch', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  #connectBtn:hover { filter: brightness(1.1); }
+  #connectBtn:disabled { opacity: 0.5; cursor: default; }
+
+  .wallet-pill {
+    font-size: 13px;
+    color: var(--text-dim);
+    border: 1px solid var(--panel-line);
+    padding: 8px 14px;
+    border-radius: 3px;
+  }
+  .wallet-pill b { color: var(--text); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    padding: 20px;
+  }
+
+  .panel + .panel { margin-top: 20px; }
+
+  .panel h2 {
+    font-size: 15px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--panel-line);
+    font-size: 14px;
+  }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-row .v { color: var(--green); font-weight: 600; }
+
+  .actions { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+
+  .btn {
+    background: transparent;
+    border: 1px solid var(--green);
+    color: var(--green);
+    padding: 12px 16px;
+    font-family: 'Chakra Petch', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .btn:hover:not(:disabled) { background: rgba(76,255,179,0.08); }
+  .btn:disabled { opacity: 0.4; cursor: default; border-color: var(--panel-line); color: var(--text-dim); }
+  .btn small { font-family: 'IBM Plex Mono'; font-weight: 400; color: var(--text-dim); }
+
+  .wager-row { display: flex; gap: 8px; }
+  .wager-row input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--panel-line);
+    color: var(--text);
+    padding: 12px;
+    font-family: 'IBM Plex Mono';
+    border-radius: 3px;
+    font-size: 14px;
+  }
+
+  #log {
+    font-size: 13px;
+    line-height: 1.7;
+    max-height: 220px;
+    overflow-y: auto;
+    color: var(--text-dim);
+  }
+  #log .win { color: var(--green); }
+  #log .lose { color: var(--red); }
+  #log .pending { color: var(--amber); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--panel-line); }
+  td { padding: 8px; border-bottom: 1px solid var(--panel-line); }
+  tr:last-child td { border-bottom: none; }
+  .rank { color: var(--text-dim); width: 24px; }
+  .addr { color: var(--text); }
+  .you-row td { background: rgba(76,255,179,0.06); }
+
+  .pulse {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    opacity: 0;
+    z-index: 50;
+  }
+  .pulse.fire {
+    animation: pulseFlash 1.1s ease-out;
+  }
+  .pulse-text {
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 48px;
+    font-weight: 700;
+  }
+  @keyframes pulseFlash {
+    0%   { opacity: 0; transform: scale(0.85); }
+    20%  { opacity: 1; transform: scale(1); }
+    70%  { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1.05); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pulse.fire { animation: none; opacity: 0; }
+  }
+
+  .setup-note {
+    font-size: 12px;
+    color: var(--amber);
+    border: 1px dashed var(--amber);
+    padding: 10px 12px;
+    border-radius: 3px;
+    margin-bottom: 20px;
+  }
+  .setup-note code { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="pulse" id="pulse"><div class="pulse-text" id="pulseText"></div></div>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>BOT<span>_ARENA</span></h1>
+      <div class="net-tag">train &middot; battle &middot; climb — Sepolia testnet</div>
+    </div>
+    <div id="walletZone">
+      <button id="connectBtn">Connect MetaMask</button>
+    </div>
+  </header>
+
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <h2>Your Bot</h2>
+        <div class="stat-row"><span>BOT balance</span><span class="v" id="balBot">—</span></div>
+        <div class="stat-row"><span>XP</span><span class="v" id="balXp">—</span></div>
+        <div class="stat-row"><span>Train cooldown</span><span class="v" id="cooldown">—</span></div>
+
+        <div class="actions">
+          <button class="btn" id="claimBtn" disabled>
+            Claim starter BOT <small>one-time, 100 BOT</small>
+          </button>
+          <button class="btn" id="trainBtn" disabled>
+            Train <small>+10 BOT / +5 XP</small>
+          </button>
+          <div class="wager-row">
+            <input id="wagerInput" type="number" min="1" placeholder="Wager amount (BOT)" />
+            <button class="btn" id="queueBtn" disabled style="white-space:nowrap;">Join Arena</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Battle Log</h2>
+        <div id="log">Connect your wallet to begin.</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Leaderboard</h2>
+      <table>
+        <thead><tr><th class="rank">#</th><th>Wallet</th><th>XP</th><th>BOT</th></tr></thead>
+        <tbody id="leaderboardBody">
+          <tr><td colspan="4" style="color:var(--text-dim);">No data yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------
+// Fill this in after deploying BotArena.sol in Remix
+// ---------------------------------------------------------------
+const CONTRACT_ADDRESS = "0x27633E72d87E94A3Aa96dDcfa275d1a03Ec30AF2";
+const SEPOLIA_CHAIN_ID = 11155111n;
+
+const ABI = [
+  "function claimStarter() external",
+  "function train() external",
+  "function joinQueue(uint256 wager) external",
+  "function balanceOf(address) view returns (uint256)",
+  "function xpOf(address) view returns (uint256)",
+  "function lastTrainedAt(address) view returns (uint256)",
+  "function hasClaimedStarter(address) view returns (bool)",
+  "function TRAIN_COOLDOWN() view returns (uint256)",
+  "function getLeaderboard() view returns (address[] addrs, uint256[] xp, uint256[] bal)",
+  "event StarterClaimed(address indexed player, uint256 amount)",
+  "event Trained(address indexed player, uint256 reward, uint256 xpGained)",
+  "event QueueJoined(address indexed player, uint256 wager)",
+  "event BattleResolved(address indexed winner, address indexed loser, uint256 wager, uint256 payout, uint256 burned)"
+];
+
+let provider, signer, contract, userAddress;
+let cooldownTimer = null;
+
+const $ = (id) => document.getElementById(id);
+
+function fmt(bigIntWei) {
+  return Number(ethers.formatUnits(bigIntWei, 18)).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+function short(addr) {
+  return addr.slice(0, 6) + "…" + addr.slice(-4);
+}
+function logLine(html, cls) {
+  const el = $("log");
+  const line = document.createElement("div");
+  line.className = cls || "";
+  line.innerHTML = html;
+  if (el.firstChild && el.firstChild.textContent === "Connect your wallet to begin.") el.innerHTML = "";
+  el.prepend(line);
+}
+function firePulse(text, color) {
+  const p = $("pulse"), t = $("pulseText");
+  t.textContent = text;
+  t.style.color = color;
+  p.classList.remove("fire");
+  void p.offsetWidth; // restart animation
+  p.classList.add("fire");
+}
+
+async function connect() {
+  if (!window.ethereum) {
+    alert("MetaMask not found. Install it from metamask.io first.");
+    return;
+  }
+  provider = new ethers.BrowserProvider(window.ethereum);
+  await provider.send("eth_requestAccounts", []);
+
+  const network = await provider.getNetwork();
+  if (network.chainId !== SEPOLIA_CHAIN_ID) {
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: "0xaa36a7" }] // 11155111 in hex
+      });
+    } catch (e) {
+      logLine("Please switch MetaMask to the Sepolia test network.", "lose");
+      return;
+    }
+  }
+
+  signer = await provider.getSigner();
+  userAddress = await signer.getAddress();
+  contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+
+  $("walletZone").innerHTML = `<div class="wallet-pill">Connected: <b>${short(userAddress)}</b></div>`;
+  $("claimBtn").disabled = false;
+  $("trainBtn").disabled = false;
+  $("queueBtn").disabled = false;
+
+  bindEvents();
+  await refreshStats();
+  await refreshLeaderboard();
+  logLine(`Wallet connected: ${short(userAddress)}`, "win");
+}
+
+async function refreshStats() {
+  if (!contract || !userAddress) return;
+  const [bal, xp, claimed, lastTrain, cd] = await Promise.all([
+    contract.balanceOf(userAddress),
+    contract.xpOf(userAddress),
+    contract.hasClaimedStarter(userAddress),
+    contract.lastTrainedAt(userAddress),
+    contract.TRAIN_COOLDOWN()
+  ]);
+
+  $("balBot").textContent = fmt(bal);
+  $("balXp").textContent = xp.toString();
+  $("claimBtn").disabled = claimed;
+  $("claimBtn").querySelector("small").textContent = claimed ? "already claimed" : "one-time, 100 BOT";
+
+  startCooldownDisplay(Number(lastTrain), Number(cd));
+}
+
+function startCooldownDisplay(lastTrain, cooldownSecs) {
+  if (cooldownTimer) clearInterval(cooldownTimer);
+  const tick = () => {
+    const readyAt = lastTrain === 0 ? 0 : (lastTrain + cooldownSecs) * 1000;
+    const remaining = readyAt - Date.now();
+    if (remaining <= 0) {
+      $("cooldown").textContent = "ready";
+      $("trainBtn").disabled = false;
+      clearInterval(cooldownTimer);
+    } else {
+      $("cooldown").textContent = Math.ceil(remaining / 1000) + "s";
+      $("trainBtn").disabled = true;
+    }
+  };
+  tick();
+  cooldownTimer = setInterval(tick, 1000);
+}
+
+async function refreshLeaderboard() {
+  if (!contract) return;
+  const [addrs, xps, bals] = await contract.getLeaderboard();
+  const rows = addrs.map((a, i) => ({ addr: a, xp: Number(xps[i]), bal: bals[i] }));
+  rows.sort((a, b) => b.xp - a.xp);
+
+  const body = $("leaderboardBody");
+  if (rows.length === 0) {
+    body.innerHTML = `<tr><td colspan="4" style="color:var(--text-dim);">No data yet.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.slice(0, 15).map((r, i) => `
+    <tr class="${r.addr.toLowerCase() === (userAddress || "").toLowerCase() ? "you-row" : ""}">
+      <td class="rank">${i + 1}</td>
+      <td class="addr">${short(r.addr)}</td>
+      <td>${r.xp}</td>
+      <td>${fmt(r.bal)}</td>
+    </tr>
+  `).join("");
+}
+
+function bindEvents() {
+  contract.on("StarterClaimed", (player) => {
+    if (player.toLowerCase() === userAddress.toLowerCase()) {
+      logLine("Starter pack claimed — 100 BOT credited.", "win");
+      refreshStats(); refreshLeaderboard();
+    }
+  });
+  contract.on("Trained", (player) => {
+    if (player.toLowerCase() === userAddress.toLowerCase()) {
+      logLine("Training complete — +10 BOT, +5 XP.", "win");
+      refreshStats(); refreshLeaderboard();
+    }
+  });
+  contract.on("QueueJoined", (player, wager) => {
+    if (player.toLowerCase() === userAddress.toLowerCase()) {
+      logLine(`Queued for battle at ${fmt(wager)} BOT. Waiting for an opponent…`, "pending");
+    }
+  });
+  contract.on("BattleResolved", (winner, loser, wager, payout, burned) => {
+    const isMe = [winner, loser].some(a => a.toLowerCase() === userAddress.toLowerCase());
+    if (!isMe) { refreshLeaderboard(); return; }
+    const won = winner.toLowerCase() === userAddress.toLowerCase();
+    firePulse(won ? "VICTORY" : "DEFEAT", won ? "#4CFFB3" : "#FF5C5C");
+    logLine(
+      won
+        ? `Battle won vs ${short(loser)} — earned ${fmt(payout)} BOT (${fmt(burned)} burned from pot).`
+        : `Battle lost vs ${short(winner)} — ${fmt(wager)} BOT gone.`,
+      won ? "win" : "lose"
+    );
+    refreshStats(); refreshLeaderboard();
+  });
+}
+
+$("connectBtn").addEventListener("click", connect);
+
+$("claimBtn").addEventListener("click", async () => {
+  try {
+    $("claimBtn").disabled = true;
+    const tx = await contract.claimStarter();
+    logLine("Claim submitted, waiting for confirmation…", "pending");
+    await tx.wait();
+  } catch (e) {
+    logLine("Claim failed: " + (e.shortMessage || e.message), "lose");
+    $("claimBtn").disabled = false;
+  }
+});
+
+$("trainBtn").addEventListener("click", async () => {
+  try {
+    $("trainBtn").disabled = true;
+    const tx = await contract.train();
+    logLine("Training submitted, waiting for confirmation…", "pending");
+    await tx.wait();
+  } catch (e) {
+    logLine("Train failed: " + (e.shortMessage || e.message), "lose");
+    $("trainBtn").disabled = false;
+  }
+});
+
+$("queueBtn").addEventListener("click", async () => {
+  const raw = $("wagerInput").value;
+  if (!raw || Number(raw) <= 0) { alert("Enter a wager amount first."); return; }
+  try {
+    $("queueBtn").disabled = true;
+    const wei = ethers.parseUnits(raw, 18);
+    const tx = await contract.joinQueue(wei);
+    logLine(`Joining arena at ${raw} BOT, waiting for confirmation…`, "pending");
+    await tx.wait();
+  } catch (e) {
+    logLine("Queue join failed: " + (e.shortMessage || e.message), "lose");
+  } finally {
+    $("queueBtn").disabled = false;
+  }
+});
+</script>
+</body>
+</html>
