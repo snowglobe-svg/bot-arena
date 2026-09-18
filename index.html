@@ -273,11 +273,36 @@
 </div>
 
 <script>
-// ---------------------------------------------------------------
-// Fill this in after deploying BotArena.sol in Remix
-// ---------------------------------------------------------------
-const CONTRACT_ADDRESS = "0x27633E72d87E94A3Aa96dDcfa275d1a03Ec30AF2";
-const SEPOLIA_CHAIN_ID = 11155111n;
+
+const CONTRACT_ADDRESS = "0xDa9cd3C7B534F40abBca15eac0895Fc189ebA31E";
+const BOT_CHAIN_PARAMS = {
+  chainId: "0x3C8",
+  chainName: "BOT Chain Testnet",
+  nativeCurrency: { name: "BOT", symbol: "BOT", decimals: 18 },
+  rpcUrls: ["https://rpc.bohr.life"],
+  blockExplorerUrls: ["https://scan.bohr.life/"]
+};
+
+async function checkNetwork() {
+  if (!window.ethereum) return;
+  const chainId = await window.ethereum.request({ method: "eth_chainId" });
+  
+  if (chainId !== BOT_CHAIN_PARAMS.chainId) {
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: BOT_CHAIN_PARAMS.chainId }],
+      });
+    } catch (switchError) {
+      if (switchError.code === 4902) {
+        await window.ethereum.request({
+          method: "wallet_addEthereumChain",
+          params: [BOT_CHAIN_PARAMS],
+        });
+      }
+    }
+  }
+}
 
 const ABI = [
   "function claimStarter() external",
