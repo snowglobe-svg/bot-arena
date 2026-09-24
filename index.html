@@ -204,16 +204,6 @@
   @media (prefers-reduced-motion: reduce) {
     .pulse.fire { animation: none; opacity: 0; }
   }
-
-  .setup-note {
-    font-size: 12px;
-    color: var(--amber);
-    border: 1px dashed var(--amber);
-    padding: 10px 12px;
-    border-radius: 3px;
-    margin-bottom: 20px;
-  }
-  .setup-note code { color: var(--text); }
 </style>
 </head>
 <body>
@@ -230,7 +220,6 @@
       <button id="connectBtn">Connect MetaMask</button>
     </div>
   </header>
-
 
   <div class="grid">
     <div>
@@ -249,7 +238,8 @@
           </button>
           <div class="wager-row">
             <input id="wagerInput" type="number" min="1" placeholder="Wager amount (BOT)" />
-            <button class="btn" id="queueBtn" disabled style="white-space:nowrap;">Join Arena</button>
+            <button class="btn" id="queueBtn" disabled style="white-space:nowrap;" onclick="joinQueue()">Join Arena</button>
+            <button class="btn" id="btnLeaveQueue" style="white-space:nowrap; display:none;" onclick="leaveQueue()">Leave Queue</button>
           </div>
         </div>
       </div>
@@ -273,7 +263,6 @@
 </div>
 
 <script>
-
 const CONTRACT_ADDRESS = "0xDa9cd3C7B534F40abBca15eac0895Fc189ebA31E";
 const BOT_CHAIN_PARAMS = {
   chainId: "0x3C8",
@@ -287,6 +276,7 @@ const ABI = [
   "function claimStarter() external",
   "function train() external",
   "function joinQueue(uint256 wager) external",
+  "function leaveQueue() external",
   "function balanceOf(address) view returns (uint256)",
   "function xpOf(address) view returns (uint256)",
   "function lastTrainedAt(address) view returns (uint256)",
@@ -323,7 +313,7 @@ function firePulse(text, color) {
   t.textContent = text;
   t.style.color = color;
   p.classList.remove("fire");
-  void p.offsetWidth; // restart animation
+  void p.offsetWidth;
   p.classList.add("fire");
 }
 
@@ -335,7 +325,7 @@ async function connect() {
   provider = new ethers.BrowserProvider(window.ethereum);
   await provider.send("eth_requestAccounts", []);
 
-const network = await provider.getNetwork();
+  const network = await provider.getNetwork();
   const targetChainId = BigInt(BOT_CHAIN_PARAMS.chainId);
 
   if (network.chainId !== targetChainId) {
@@ -430,27 +420,19 @@ async function refreshLeaderboard() {
 }
 
 function bindEvents() {
-  contract.on("StarterClaimed", (...args) => {
-    const player = args[0];
-    if (player.toLowerCase() === userAddress.toLowerCase()) {
-      logLine("Starter pack claimed — 100 BOT credited.", "win");
-      refreshStats(); refreshLeaderboard();
-    }
-  });
   contract.on("Trained", (...args) => {
-    const player = args[0];
-    if (player.toLowerCase() === userAddress.toLowerCase()) {
-      logLine("Training complete — +10 BOT, +5 XP.", "win");
-      refreshStats(); refreshLeaderboard();
-    }
+    // ...
   });
+
   contract.on("QueueJoined", (...args) => {
     const player = args[0];
     const wager = args[1];
     if (player.toLowerCase() === userAddress.toLowerCase()) {
-      logLine(`Queued for battle at ${fmt(wager)} BOT. Waiting for an opponent…`, "pending");
+      logLine(`Queued for battle at ${fmt(wager)} BOT. Waiting for an opponent...`, "pending");
+      document.getElementById("btnLeaveQueue").style.display = "inline-block";
     }
   });
+
   contract.on("BattleResolved", (...args) => {
     const [winner, loser, wager, payout, burned] = args;
     const isMe = [winner, loser].some(a => a.toLowerCase() === userAddress.toLowerCase());
@@ -463,37 +445,12 @@ function bindEvents() {
         : `Battle lost vs ${short(winner)} — ${fmt(wager)} BOT gone.`,
       won ? "win" : "lose"
     );
+    document.getElementById("btnLeaveQueue").style.display = "none";
     refreshStats(); refreshLeaderboard();
   });
 }
 
-$("connectBtn").addEventListener("click", connect);
-
-$("claimBtn").addEventListener("click", async () => {
-  try {
-    $("claimBtn").disabled = true;
-    const tx = await contract.claimStarter();
-    logLine("Claim submitted, waiting for confirmation…", "pending");
-    await tx.wait();
-  } catch (e) {
-    logLine("Claim failed: " + (e.shortMessage || e.message), "lose");
-    $("claimBtn").disabled = false;
-  }
-});
-
-$("trainBtn").addEventListener("click", async () => {
-  try {
-    $("trainBtn").disabled = true;
-    const tx = await contract.train();
-    logLine("Training submitted, waiting for confirmation…", "pending");
-    await tx.wait();
-  } catch (e) {
-    logLine("Train failed: " + (e.shortMessage || e.message), "lose");
-    $("trainBtn").disabled = false;
-  }
-});
-
-$("queueBtn").addEventListener("click", async () => {
+async function joinQueue() {
   const raw = $("wagerInput").value;
   if (!raw || Number(raw) <= 0) { alert("Enter a wager amount first."); return; }
   try {
@@ -506,6 +463,47 @@ $("queueBtn").addEventListener("click", async () => {
     logLine("Queue join failed: " + (e.shortMessage || e.message), "lose");
   } finally {
     $("queueBtn").disabled = false;
+  }
+}
+
+async function leaveQueue() {
+  try {
+    logLine("Leaving queue...", "pending");
+    const tx = await contract.leaveQueue();
+    await tx.wait();
+    logLine("Successfully left the battle queue.", "win");
+    document.getElementById("btnLeaveQueue").style.display = "none";
+    refreshStats();
+  } catch (err) {
+    logLine("Failed to leave queue: " + (err.reason || err.message), "lose");
+  }
+}
+
+$("connectBtn").addEventListener("click", connect);
+
+$("claimBtn").addEventListener("click", async () => {
+  try {
+    $("claimBtn").disabled = true;
+    const tx = await contract.claimStarter();
+    logLine("Claim submitted, waiting for confirmation…", "pending");
+    await tx.wait();
+    refreshStats();
+  } catch (e) {
+    logLine("Claim failed: " + (e.shortMessage || e.message), "lose");
+    $("claimBtn").disabled = false;
+  }
+});
+
+$("trainBtn").addEventListener("click", async () => {
+  try {
+    $("trainBtn").disabled = true;
+    const tx = await contract.train();
+    logLine("Training submitted, waiting for confirmation…", "pending");
+    await tx.wait();
+    refreshStats();
+  } catch (e) {
+    logLine("Train failed: " + (e.shortMessage || e.message), "lose");
+    $("trainBtn").disabled = false;
   }
 });
 
