@@ -224,7 +224,7 @@
   <header>
     <div>
       <h1>BOT<span>_ARENA</span></h1>
-      <div class="net-tag">train &middot; battle &middot; climb — Sepolia testnet</div>
+      <div class="net-tag">train &middot; battle &middot; climb — BOT CHAIN testnet</div>
     </div>
     <div id="walletZone">
       <button id="connectBtn">Connect MetaMask</button>
@@ -280,29 +280,8 @@ const BOT_CHAIN_PARAMS = {
   chainName: "BOT Chain Testnet",
   nativeCurrency: { name: "BOT", symbol: "BOT", decimals: 18 },
   rpcUrls: ["https://rpc.bohr.life"],
-  blockExplorerUrls: ["https://scan.bohr.life/"]
+  blockExplorerUrls: ["https://scan.botchain.ai/"]
 };
-
-async function checkNetwork() {
-  if (!window.ethereum) return;
-  const chainId = await window.ethereum.request({ method: "eth_chainId" });
-  
-  if (chainId !== BOT_CHAIN_PARAMS.chainId) {
-    try {
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: BOT_CHAIN_PARAMS.chainId }],
-      });
-    } catch (switchError) {
-      if (switchError.code === 4902) {
-        await window.ethereum.request({
-          method: "wallet_addEthereumChain",
-          params: [BOT_CHAIN_PARAMS],
-        });
-      }
-    }
-  }
-}
 
 const ABI = [
   "function claimStarter() external",
@@ -356,16 +335,25 @@ async function connect() {
   provider = new ethers.BrowserProvider(window.ethereum);
   await provider.send("eth_requestAccounts", []);
 
-  const network = await provider.getNetwork();
-  if (network.chainId !== SEPOLIA_CHAIN_ID) {
+const network = await provider.getNetwork();
+  const targetChainId = BigInt(BOT_CHAIN_PARAMS.chainId);
+
+  if (network.chainId !== targetChainId) {
     try {
       await window.ethereum.request({
         method: "wallet_switchEthereumChain",
-        params: [{ chainId: "0xaa36a7" }] // 11155111 in hex
+        params: [{ chainId: BOT_CHAIN_PARAMS.chainId }],
       });
-    } catch (e) {
-      logLine("Please switch MetaMask to the Sepolia test network.", "lose");
-      return;
+    } catch (switchError) {
+      if (switchError.code === 4902) {
+        await window.ethereum.request({
+          method: "wallet_addEthereumChain",
+          params: [BOT_CHAIN_PARAMS],
+        });
+      } else {
+        logLine("Please switch MetaMask to BOT Chain Testnet.", "lose");
+        return;
+      }
     }
   }
 
@@ -442,24 +430,29 @@ async function refreshLeaderboard() {
 }
 
 function bindEvents() {
-  contract.on("StarterClaimed", (player) => {
+  contract.on("StarterClaimed", (...args) => {
+    const player = args[0];
     if (player.toLowerCase() === userAddress.toLowerCase()) {
       logLine("Starter pack claimed — 100 BOT credited.", "win");
       refreshStats(); refreshLeaderboard();
     }
   });
-  contract.on("Trained", (player) => {
+  contract.on("Trained", (...args) => {
+    const player = args[0];
     if (player.toLowerCase() === userAddress.toLowerCase()) {
       logLine("Training complete — +10 BOT, +5 XP.", "win");
       refreshStats(); refreshLeaderboard();
     }
   });
-  contract.on("QueueJoined", (player, wager) => {
+  contract.on("QueueJoined", (...args) => {
+    const player = args[0];
+    const wager = args[1];
     if (player.toLowerCase() === userAddress.toLowerCase()) {
       logLine(`Queued for battle at ${fmt(wager)} BOT. Waiting for an opponent…`, "pending");
     }
   });
-  contract.on("BattleResolved", (winner, loser, wager, payout, burned) => {
+  contract.on("BattleResolved", (...args) => {
+    const [winner, loser, wager, payout, burned] = args;
     const isMe = [winner, loser].some(a => a.toLowerCase() === userAddress.toLowerCase());
     if (!isMe) { refreshLeaderboard(); return; }
     const won = winner.toLowerCase() === userAddress.toLowerCase();
@@ -515,6 +508,11 @@ $("queueBtn").addEventListener("click", async () => {
     $("queueBtn").disabled = false;
   }
 });
+
+if (window.ethereum) {
+  window.ethereum.on("accountsChanged", () => window.location.reload());
+  window.ethereum.on("chainChanged", () => window.location.reload());
+}
 </script>
 
 <footer style="text-align: center; padding: 20px; margin-top: 40px; border-top: 1px solid #333; color: #aaa; font-family: sans-serif;">
