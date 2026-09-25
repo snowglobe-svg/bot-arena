@@ -286,11 +286,13 @@ const ABI = [
   "event StarterClaimed(address indexed player, uint256 amount)",
   "event Trained(address indexed player, uint256 reward, uint256 xpGained)",
   "event QueueJoined(address indexed player, uint256 wager)",
+  "event QueueLeft(address indexed player)",
   "event BattleResolved(address indexed winner, address indexed loser, uint256 wager, uint256 payout, uint256 burned)"
 ];
 
 let provider, signer, contract, userAddress;
 let cooldownTimer = null;
+let pollTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -359,25 +361,30 @@ async function connect() {
   bindEvents();
   await refreshStats();
   await refreshLeaderboard();
+  startBackgroundPolling();
   logLine(`Wallet connected: ${short(userAddress)}`, "win");
 }
 
 async function refreshStats() {
   if (!contract || !userAddress) return;
-  const [bal, xp, claimed, lastTrain, cd] = await Promise.all([
-    contract.balanceOf(userAddress),
-    contract.xpOf(userAddress),
-    contract.hasClaimedStarter(userAddress),
-    contract.lastTrainedAt(userAddress),
-    contract.TRAIN_COOLDOWN()
-  ]);
+  try {
+    const [bal, xp, claimed, lastTrain, cd] = await Promise.all([
+      contract.balanceOf(userAddress),
+      contract.xpOf(userAddress),
+      contract.hasClaimedStarter(userAddress),
+      contract.lastTrainedAt(userAddress),
+      contract.TRAIN_COOLDOWN()
+    ]);
 
-  $("balBot").textContent = fmt(bal);
-  $("balXp").textContent = xp.toString();
-  $("claimBtn").disabled = claimed;
-  $("claimBtn").querySelector("small").textContent = claimed ? "already claimed" : "one-time, 100 BOT";
+    $("balBot").textContent = fmt(bal);
+    $("balXp").textContent = xp.toString();
+    $("claimBtn").disabled = claimed;
+    $("claimBtn").querySelector("small").textContent = claimed ? "already claimed" : "one-time, 100 BOT";
 
-  startCooldownDisplay(Number(lastTrain), Number(cd));
+    startCooldownDisplay(Number(lastTrain), Number(cd));
+  } catch (e) {
+    console.error("Error refreshing stats:", e);
+  }
 }
 
 function startCooldownDisplay(lastTrain, cooldownSecs) {
@@ -398,30 +405,43 @@ function startCooldownDisplay(lastTrain, cooldownSecs) {
   cooldownTimer = setInterval(tick, 1000);
 }
 
+function startBackgroundPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(() => {
+    refreshStats();
+    refreshLeaderboard();
+  }, 4000);
+}
+
 async function refreshLeaderboard() {
   if (!contract) return;
-  const [addrs, xps, bals] = await contract.getLeaderboard();
-  const rows = addrs.map((a, i) => ({ addr: a, xp: Number(xps[i]), bal: bals[i] }));
-  rows.sort((a, b) => b.xp - a.xp);
+  try {
+    const [addrs, xps, bals] = await contract.getLeaderboard();
+    const rows = addrs.map((a, i) => ({ addr: a, xp: Number(xps[i]), bal: bals[i] }));
+    rows.sort((a, b) => b.xp - a.xp);
 
-  const body = $("leaderboardBody");
-  if (rows.length === 0) {
-    body.innerHTML = `<tr><td colspan="4" style="color:var(--text-dim);">No data yet.</td></tr>`;
-    return;
+    const body = $("leaderboardBody");
+    if (rows.length === 0) {
+      body.innerHTML = `<tr><td colspan="4" style="color:var(--text-dim);">No data yet.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.slice(0, 15).map((r, i) => `
+      <tr class="${r.addr.toLowerCase() === (userAddress || "").toLowerCase() ? "you-row" : ""}">
+        <td class="rank">${i + 1}</td>
+        <td class="addr">${short(r.addr)}</td>
+        <td>${r.xp}</td>
+        <td>${fmt(r.bal)}</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    console.error("Error refreshing leaderboard:", e);
   }
-  body.innerHTML = rows.slice(0, 15).map((r, i) => `
-    <tr class="${r.addr.toLowerCase() === (userAddress || "").toLowerCase() ? "you-row" : ""}">
-      <td class="rank">${i + 1}</td>
-      <td class="addr">${short(r.addr)}</td>
-      <td>${r.xp}</td>
-      <td>${fmt(r.bal)}</td>
-    </tr>
-  `).join("");
 }
 
 function bindEvents() {
   contract.on("Trained", (...args) => {
-    // ...
+    refreshStats();
+    refreshLeaderboard();
   });
 
   contract.on("QueueJoined", (...args) => {
@@ -429,7 +449,17 @@ function bindEvents() {
     const wager = args[1];
     if (player.toLowerCase() === userAddress.toLowerCase()) {
       logLine(`Queued for battle at ${fmt(wager)} BOT. Waiting for an opponent...`, "pending");
-      document.getElementById("btnLeaveQueue").style.display = "inline-block";
+      $("btnLeaveQueue").style.display = "inline-block";
+      $("queueBtn").style.display = "none";
+    }
+  });
+
+  contract.on("QueueLeft", (...args) => {
+    const player = args[0];
+    if (player.toLowerCase() === userAddress.toLowerCase()) {
+      $("btnLeaveQueue").style.display = "none";
+      $("queueBtn").style.display = "inline-block";
+      $("queueBtn").disabled = false;
     }
   });
 
@@ -445,8 +475,11 @@ function bindEvents() {
         : `Battle lost vs ${short(winner)} — ${fmt(wager)} BOT gone.`,
       won ? "win" : "lose"
     );
-    document.getElementById("btnLeaveQueue").style.display = "none";
-    refreshStats(); refreshLeaderboard();
+    $("btnLeaveQueue").style.display = "none";
+    $("queueBtn").style.display = "inline-block";
+    $("queueBtn").disabled = false;
+    refreshStats(); 
+    refreshLeaderboard();
   });
 }
 
@@ -456,26 +489,42 @@ async function joinQueue() {
   try {
     $("queueBtn").disabled = true;
     const wei = ethers.parseUnits(raw, 18);
-    const tx = await contract.joinQueue(wei);
     logLine(`Joining arena at ${raw} BOT, waiting for confirmation…`, "pending");
-    await tx.wait();
+    
+    const tx = await contract.joinQueue(wei);
+    await tx.wait(1); // Wait for 1 block confirmation
+    
+    logLine(`Joined queue successfully at ${raw} BOT!`, "win");
+    $("btnLeaveQueue").style.display = "inline-block";
+    $("queueBtn").style.display = "none";
+    
+    await refreshStats();
+    await refreshLeaderboard();
   } catch (e) {
     logLine("Queue join failed: " + (e.shortMessage || e.message), "lose");
-  } finally {
     $("queueBtn").disabled = false;
   }
 }
 
 async function leaveQueue() {
   try {
-    logLine("Leaving queue...", "pending");
+    $("btnLeaveQueue").disabled = true;
+    logLine("Leaving queue, waiting for confirmation...", "pending");
+    
     const tx = await contract.leaveQueue();
-    await tx.wait();
+    await tx.wait(1); // Wait for 1 block confirmation
+    
     logLine("Successfully left the battle queue.", "win");
-    document.getElementById("btnLeaveQueue").style.display = "none";
-    refreshStats();
+    $("btnLeaveQueue").style.display = "none";
+    $("btnLeaveQueue").disabled = false;
+    $("queueBtn").style.display = "inline-block";
+    $("queueBtn").disabled = false;
+    
+    await refreshStats();
+    await refreshLeaderboard();
   } catch (err) {
     logLine("Failed to leave queue: " + (err.reason || err.message), "lose");
+    $("btnLeaveQueue").disabled = false;
   }
 }
 
@@ -484,10 +533,14 @@ $("connectBtn").addEventListener("click", connect);
 $("claimBtn").addEventListener("click", async () => {
   try {
     $("claimBtn").disabled = true;
-    const tx = await contract.claimStarter();
     logLine("Claim submitted, waiting for confirmation…", "pending");
-    await tx.wait();
-    refreshStats();
+    
+    const tx = await contract.claimStarter();
+    await tx.wait(1);
+    
+    logLine("Starter BOT claimed successfully!", "win");
+    await refreshStats();
+    await refreshLeaderboard();
   } catch (e) {
     logLine("Claim failed: " + (e.shortMessage || e.message), "lose");
     $("claimBtn").disabled = false;
@@ -497,10 +550,14 @@ $("claimBtn").addEventListener("click", async () => {
 $("trainBtn").addEventListener("click", async () => {
   try {
     $("trainBtn").disabled = true;
-    const tx = await contract.train();
     logLine("Training submitted, waiting for confirmation…", "pending");
-    await tx.wait();
-    refreshStats();
+    
+    const tx = await contract.train();
+    await tx.wait(1);
+    
+    logLine("Training complete! +10 BOT / +5 XP gained.", "win");
+    await refreshStats();
+    await refreshLeaderboard();
   } catch (e) {
     logLine("Train failed: " + (e.shortMessage || e.message), "lose");
     $("trainBtn").disabled = false;
