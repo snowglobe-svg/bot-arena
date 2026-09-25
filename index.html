@@ -238,8 +238,8 @@
           </button>
           <div class="wager-row">
             <input id="wagerInput" type="number" min="1" placeholder="Wager amount (BOT)" />
-            <button class="btn" id="queueBtn" disabled style="white-space:nowrap;" onclick="joinQueue()">Join Arena</button>
-            <button class="btn" id="btnLeaveQueue" style="white-space:nowrap; display:none;" onclick="leaveQueue()">Leave Queue</button>
+            <button class="btn" id="queueBtn" disabled style="white-space:nowrap;">Join Arena</button>
+            <button class="btn" id="btnLeaveQueue" style="white-space:nowrap; display:none;">Leave Queue</button>
           </div>
         </div>
       </div>
@@ -293,6 +293,8 @@ const ABI = [
 let provider, signer, contract, userAddress;
 let cooldownTimer = null;
 let pollTimer = null;
+let eventsBound = false;
+let txPending = false;
 
 const $ = (id) => document.getElementById(id);
 
@@ -366,7 +368,7 @@ async function connect() {
 }
 
 async function refreshStats() {
-  if (!contract || !userAddress) return;
+  if (!contract || !userAddress || txPending) return;
   try {
     const [bal, xp, claimed, lastTrain, cd] = await Promise.all([
       contract.balanceOf(userAddress),
@@ -408,6 +410,7 @@ function startCooldownDisplay(lastTrain, cooldownSecs) {
 function startBackgroundPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(() => {
+    if (txPending) return;
     refreshStats();
     refreshLeaderboard();
   }, 4000);
@@ -439,7 +442,12 @@ async function refreshLeaderboard() {
 }
 
 function bindEvents() {
+  if (eventsBound) return; // guard: connect() can run more than once per page life
+  eventsBound = true;
+
   contract.on("Trained", (...args) => {
+    const player = args[0];
+    if (player.toLowerCase() !== userAddress.toLowerCase()) return;
     refreshStats();
     refreshLeaderboard();
   });
@@ -488,6 +496,7 @@ async function joinQueue() {
   if (!raw || Number(raw) <= 0) { alert("Enter a wager amount first."); return; }
   try {
     $("queueBtn").disabled = true;
+    txPending = true;
     const wei = ethers.parseUnits(raw, 18);
     logLine(`Joining arena at ${raw} BOT, waiting for confirmation…`, "pending");
     
@@ -498,17 +507,20 @@ async function joinQueue() {
     $("btnLeaveQueue").style.display = "inline-block";
     $("queueBtn").style.display = "none";
     
+    txPending = false;
     await refreshStats();
     await refreshLeaderboard();
   } catch (e) {
     logLine("Queue join failed: " + (e.shortMessage || e.message), "lose");
     $("queueBtn").disabled = false;
+    txPending = false;
   }
 }
 
 async function leaveQueue() {
   try {
     $("btnLeaveQueue").disabled = true;
+    txPending = true;
     logLine("Leaving queue, waiting for confirmation...", "pending");
     
     const tx = await contract.leaveQueue();
@@ -520,47 +532,57 @@ async function leaveQueue() {
     $("queueBtn").style.display = "inline-block";
     $("queueBtn").disabled = false;
     
+    txPending = false;
     await refreshStats();
     await refreshLeaderboard();
   } catch (err) {
     logLine("Failed to leave queue: " + (err.reason || err.message), "lose");
     $("btnLeaveQueue").disabled = false;
+    txPending = false;
   }
 }
 
 $("connectBtn").addEventListener("click", connect);
+$("queueBtn").addEventListener("click", joinQueue);
+$("btnLeaveQueue").addEventListener("click", leaveQueue);
 
 $("claimBtn").addEventListener("click", async () => {
   try {
     $("claimBtn").disabled = true;
+    txPending = true;
     logLine("Claim submitted, waiting for confirmation…", "pending");
     
     const tx = await contract.claimStarter();
     await tx.wait(1);
     
     logLine("Starter BOT claimed successfully!", "win");
+    txPending = false;
     await refreshStats();
     await refreshLeaderboard();
   } catch (e) {
     logLine("Claim failed: " + (e.shortMessage || e.message), "lose");
     $("claimBtn").disabled = false;
+    txPending = false;
   }
 });
 
 $("trainBtn").addEventListener("click", async () => {
   try {
     $("trainBtn").disabled = true;
+    txPending = true;
     logLine("Training submitted, waiting for confirmation…", "pending");
     
     const tx = await contract.train();
     await tx.wait(1);
     
     logLine("Training complete! +10 BOT / +5 XP gained.", "win");
+    txPending = false;
     await refreshStats();
     await refreshLeaderboard();
   } catch (e) {
     logLine("Train failed: " + (e.shortMessage || e.message), "lose");
     $("trainBtn").disabled = false;
+    txPending = false;
   }
 });
 
