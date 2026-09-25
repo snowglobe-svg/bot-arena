@@ -278,7 +278,7 @@
 // Update this after redeploying the contract in BotArena.sol —
 // leaveQueue() and QueueLeft are new, so the old deployed address
 // will NOT have them. A fresh deploy is required.
-const CONTRACT_ADDRESS = "0xDa9cd3C7B534F40abBca15eac0895Fc189ebA31E";
+const CONTRACT_ADDRESS = "0xd40F8C654C3d501135434303842F2BB5496b50E2";
 const BOT_CHAIN_PARAMS = {
   chainId: "0x3C8",
   chainName: "BOT Chain Testnet",
@@ -303,7 +303,14 @@ const ABI = [
   "event Trained(address indexed player, uint256 reward, uint256 xpGained)",
   "event QueueJoined(address indexed player, uint256 wager)",
   "event QueueLeft(address indexed player, uint256 wager)",
-  "event BattleResolved(address indexed winner, address indexed loser, uint256 wager, uint256 payout, uint256 burned)"
+  "event BattleResolved(address indexed winner, address indexed loser, uint256 wager, uint256 payout, uint256 burned)",
+  "error AlreadyClaimed()",
+  "error StillCoolingDown(uint256 secondsRemaining)",
+  "error InsufficientBalance(uint256 have, uint256 need)",
+  "error WagerTooLow()",
+  "error CannotBattleSelf()",
+  "error AlreadyQueued(uint256 currentWager)",
+  "error NotQueued()"
 ];
 
 let provider, signer, contract, userAddress;
@@ -311,6 +318,7 @@ let cooldownTimer = null;
 let pollTimer = null;
 let eventsBound = false;
 let txPending = false;
+let lastKnownQueuedWager = null; // null = unknown yet, 0n = not queued, >0n = queued at that wager
 
 const $ = (id) => document.getElementById(id);
 
@@ -397,6 +405,11 @@ async function syncQueueState() {
   if (!contract || !userAddress) return;
   try {
     const wager = await contract.queuedWagerOf(userAddress);
+    if (lastKnownQueuedWager !== null && wager === lastKnownQueuedWager) return; // no change, stay quiet
+
+    const wasQueued = lastKnownQueuedWager !== null && lastKnownQueuedWager > 0n;
+    lastKnownQueuedWager = wager;
+
     if (wager > 0n) {
       const tierStr = ethers.formatUnits(wager, 18).replace(/\.0$/, "");
       const select = $("wagerSelect");
@@ -405,6 +418,7 @@ async function syncQueueState() {
       logLine(`Restored: you're queued at ${fmt(wager)} BOT.`, "pending");
     } else {
       showQueuedUI(false);
+      if (wasQueued) logLine("Queue status updated — you're no longer queued (matched or left elsewhere).", "win");
     }
   } catch (e) {
     console.error("Error syncing queue state:", e);
@@ -457,6 +471,7 @@ function startBackgroundPolling() {
     if (txPending) return;
     refreshStats();
     refreshLeaderboard();
+    syncQueueState(); // events can be unreliable on some RPCs — verify directly
   }, 4000);
 }
 
