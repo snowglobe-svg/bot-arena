@@ -147,7 +147,7 @@
   .btn small { font-family: 'IBM Plex Mono'; font-weight: 400; color: var(--text-dim); }
 
   .wager-row { display: flex; gap: 8px; }
-  .wager-row input {
+  .wager-row select {
     flex: 1;
     background: var(--bg);
     border: 1px solid var(--panel-line);
@@ -156,6 +156,11 @@
     font-family: 'IBM Plex Mono';
     border-radius: 3px;
     font-size: 14px;
+  }
+  .wager-hint {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: -4px;
   }
 
   #log {
@@ -237,10 +242,17 @@
             Train <small>+10 BOT / +5 XP</small>
           </button>
           <div class="wager-row">
-            <input id="wagerInput" type="number" min="1" placeholder="Wager amount (BOT)" />
+            <select id="wagerSelect">
+              <option value="10">10 BOT</option>
+              <option value="25">25 BOT</option>
+              <option value="50" selected>50 BOT</option>
+              <option value="100">100 BOT</option>
+              <option value="250">250 BOT</option>
+            </select>
             <button class="btn" id="queueBtn" disabled style="white-space:nowrap;">Join Arena</button>
             <button class="btn" id="btnLeaveQueue" style="white-space:nowrap; display:none;">Leave Queue</button>
           </div>
+          <div class="wager-hint">Fixed tiers only — matching requires an exact wager match, so freeform amounts can leave two players waiting forever.</div>
         </div>
       </div>
 
@@ -263,6 +275,9 @@
 </div>
 
 <script>
+// Update this after redeploying the contract in BotArena.sol —
+// leaveQueue() and QueueLeft are new, so the old deployed address
+// will NOT have them. A fresh deploy is required.
 const CONTRACT_ADDRESS = "0xDa9cd3C7B534F40abBca15eac0895Fc189ebA31E";
 const BOT_CHAIN_PARAMS = {
   chainId: "0x3C8",
@@ -282,11 +297,12 @@ const ABI = [
   "function lastTrainedAt(address) view returns (uint256)",
   "function hasClaimedStarter(address) view returns (bool)",
   "function TRAIN_COOLDOWN() view returns (uint256)",
+  "function queuedWagerOf(address) view returns (uint256)",
   "function getLeaderboard() view returns (address[] addrs, uint256[] xp, uint256[] bal)",
   "event StarterClaimed(address indexed player, uint256 amount)",
   "event Trained(address indexed player, uint256 reward, uint256 xpGained)",
   "event QueueJoined(address indexed player, uint256 wager)",
-  "event QueueLeft(address indexed player)",
+  "event QueueLeft(address indexed player, uint256 wager)",
   "event BattleResolved(address indexed winner, address indexed loser, uint256 wager, uint256 payout, uint256 burned)"
 ];
 
@@ -319,6 +335,12 @@ function firePulse(text, color) {
   p.classList.remove("fire");
   void p.offsetWidth;
   p.classList.add("fire");
+}
+function showQueuedUI(isQueued) {
+  $("btnLeaveQueue").style.display = isQueued ? "inline-block" : "none";
+  $("queueBtn").style.display = isQueued ? "none" : "inline-block";
+  $("queueBtn").disabled = isQueued;
+  $("wagerSelect").disabled = isQueued;
 }
 
 async function connect() {
@@ -363,8 +385,30 @@ async function connect() {
   bindEvents();
   await refreshStats();
   await refreshLeaderboard();
+  await syncQueueState();
   startBackgroundPolling();
   logLine(`Wallet connected: ${short(userAddress)}`, "win");
+}
+
+// On connect or refresh, ask the contract directly whether we're already
+// queued (and at what wager) rather than trusting client-side UI state,
+// which is lost on every page reload.
+async function syncQueueState() {
+  if (!contract || !userAddress) return;
+  try {
+    const wager = await contract.queuedWagerOf(userAddress);
+    if (wager > 0n) {
+      const tierStr = ethers.formatUnits(wager, 18).replace(/\.0$/, "");
+      const select = $("wagerSelect");
+      if ([...select.options].some(o => o.value === tierStr)) select.value = tierStr;
+      showQueuedUI(true);
+      logLine(`Restored: you're queued at ${fmt(wager)} BOT.`, "pending");
+    } else {
+      showQueuedUI(false);
+    }
+  } catch (e) {
+    console.error("Error syncing queue state:", e);
+  }
 }
 
 async function refreshStats() {
@@ -457,17 +501,16 @@ function bindEvents() {
     const wager = args[1];
     if (player.toLowerCase() === userAddress.toLowerCase()) {
       logLine(`Queued for battle at ${fmt(wager)} BOT. Waiting for an opponent...`, "pending");
-      $("btnLeaveQueue").style.display = "inline-block";
-      $("queueBtn").style.display = "none";
+      showQueuedUI(true);
     }
   });
 
   contract.on("QueueLeft", (...args) => {
     const player = args[0];
+    const wager = args[1];
     if (player.toLowerCase() === userAddress.toLowerCase()) {
-      $("btnLeaveQueue").style.display = "none";
-      $("queueBtn").style.display = "inline-block";
-      $("queueBtn").disabled = false;
+      logLine(`Left the queue — ${fmt(wager)} BOT refunded.`, "win");
+      showQueuedUI(false);
     }
   });
 
@@ -483,30 +526,27 @@ function bindEvents() {
         : `Battle lost vs ${short(winner)} — ${fmt(wager)} BOT gone.`,
       won ? "win" : "lose"
     );
-    $("btnLeaveQueue").style.display = "none";
-    $("queueBtn").style.display = "inline-block";
-    $("queueBtn").disabled = false;
-    refreshStats(); 
+    showQueuedUI(false);
+    refreshStats();
     refreshLeaderboard();
   });
 }
 
 async function joinQueue() {
-  const raw = $("wagerInput").value;
-  if (!raw || Number(raw) <= 0) { alert("Enter a wager amount first."); return; }
+  const raw = $("wagerSelect").value;
+  if (!raw || Number(raw) <= 0) { alert("Pick a wager tier first."); return; }
   try {
     $("queueBtn").disabled = true;
     txPending = true;
     const wei = ethers.parseUnits(raw, 18);
     logLine(`Joining arena at ${raw} BOT, waiting for confirmation…`, "pending");
-    
+
     const tx = await contract.joinQueue(wei);
     await tx.wait(1); // Wait for 1 block confirmation
-    
+
     logLine(`Joined queue successfully at ${raw} BOT!`, "win");
-    $("btnLeaveQueue").style.display = "inline-block";
-    $("queueBtn").style.display = "none";
-    
+    showQueuedUI(true);
+
     txPending = false;
     await refreshStats();
     await refreshLeaderboard();
@@ -522,16 +562,14 @@ async function leaveQueue() {
     $("btnLeaveQueue").disabled = true;
     txPending = true;
     logLine("Leaving queue, waiting for confirmation...", "pending");
-    
+
     const tx = await contract.leaveQueue();
     await tx.wait(1); // Wait for 1 block confirmation
-    
+
     logLine("Successfully left the battle queue.", "win");
-    $("btnLeaveQueue").style.display = "none";
+    showQueuedUI(false);
     $("btnLeaveQueue").disabled = false;
-    $("queueBtn").style.display = "inline-block";
-    $("queueBtn").disabled = false;
-    
+
     txPending = false;
     await refreshStats();
     await refreshLeaderboard();
@@ -551,10 +589,10 @@ $("claimBtn").addEventListener("click", async () => {
     $("claimBtn").disabled = true;
     txPending = true;
     logLine("Claim submitted, waiting for confirmation…", "pending");
-    
+
     const tx = await contract.claimStarter();
     await tx.wait(1);
-    
+
     logLine("Starter BOT claimed successfully!", "win");
     txPending = false;
     await refreshStats();
@@ -571,10 +609,10 @@ $("trainBtn").addEventListener("click", async () => {
     $("trainBtn").disabled = true;
     txPending = true;
     logLine("Training submitted, waiting for confirmation…", "pending");
-    
+
     const tx = await contract.train();
     await tx.wait(1);
-    
+
     logLine("Training complete! +10 BOT / +5 XP gained.", "win");
     txPending = false;
     await refreshStats();
@@ -594,8 +632,8 @@ if (window.ethereum) {
 
 <footer style="text-align: center; padding: 20px; margin-top: 40px; border-top: 1px solid #333; color: #aaa; font-family: sans-serif;">
   <p style="margin: 0;">
-    Powered by <a href="https://botchain.ai" target="_blank" rel="noopener" style="color: #00ffcc; text-decoration: none; font-weight: bold;">BOT Chain</a> 
-    | 
+    Powered by <a href="https://botchain.ai" target="_blank" rel="noopener" style="color: #00ffcc; text-decoration: none; font-weight: bold;">BOT Chain</a>
+    |
     View on <a href="https://scan.botchain.ai" target="_blank" rel="noopener" style="color: #00ffcc; text-decoration: none; font-weight: bold;">BOT Chain Explorer</a>
   </p>
 </footer>
